@@ -139,11 +139,6 @@ const EmployeeDashboard = memo(() => {
       <p className={styles.loadingText}>Checking authentication...</p></div></div>);
   }
   if (!userData || userData.role !== 'employee') { return <Navigate to="/login" replace />; }
-  if (isLoadingTasks) {
-    return (<div className={styles.loadingContainer}><div className={styles.loadingContent}>
-      <div className={styles.spinner}></div>
-      <p className={styles.loadingText}>Loading your tasks...</p></div></div>);
-  }
 
   return (
     <div className={styles.wrapper}>
@@ -176,7 +171,13 @@ const EmployeeDashboard = memo(() => {
             </div>
           </div>
         )}
-        <TaskList tasks={tasks} taskCounts={taskCounts} refreshTasks={refreshTasks} data={userData?.data} />
+        <TaskList
+          tasks={tasks}
+          taskCounts={taskCounts}
+          refreshTasks={refreshTasks}
+          data={userData?.data}
+          isLoading={isLoadingTasks}
+        />
 
         {/* My Groups Section */}
         {myGroups.length > 0 && (

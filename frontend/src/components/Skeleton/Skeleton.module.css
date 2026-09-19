@@ -1,0 +1,41 @@
+/* Theme tokens (sourced from TaskCard / EmployeeDashboard / TaskList modules):
+   page surface #cec0ad · card surface #ad9676 · hover/lighter #bdab91
+   accent #8b6c3e · muted accent #9c815a */
+
+.bone {
+  display: block;
+  flex-shrink: 0;
+}
+
+/* Default: card-surface shimmer on page background #cec0ad */
+.toneSurface {
+  background: linear-gradient(
+    90deg,
+    #ad9676 0%,
+    #bdab91 40%,
+    #ad9676 80%
+  );
+  background-size: 200% 100%;
+  animation: shimmer 1.4s ease-in-out infinite;
+}
+
+/* On-card bones: darker accents so they read against #ad9676 card fill */
+.toneOnSurface {
+  background: linear-gradient(
+    90deg,
+    #8b6c3e 0%,
+    #9c815a 40%,
+    #8b6c3e 80%
+  );
+  background-size: 200% 100%;
+  animation: shimmer 1.4s ease-in-out infinite;
+}
+
+@keyframes shimmer {
+  0% {
+    background-position: 100% 0;
+  }
+  100% {
+    background-position: -100% 0;
+  }
+}

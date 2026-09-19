@@ -3,6 +3,8 @@ import AcceptedTask from "./AcceptedTask";
 import NewTask from "./NewTask";
 import CompletedTask from "./CompletedTask";
 import FailedTask from "./FailedTask";
+import TaskCardSkeleton from "../Skeleton/TaskCardSkeleton";
+import Skeleton from "../Skeleton/Skeleton";
 import gsap from "gsap";
 import { useGSAP } from "@gsap/react";
 import type { Task, TaskCounts, User } from "../../types";
@@ -13,9 +15,11 @@ interface TaskListProps {
   taskCounts?: TaskCounts;
   refreshTasks?: () => void;
   data?: User;
+  /** Initial fetch — show card skeletons instead of empty categories / parent spinner. */
+  isLoading?: boolean;
 }
 
-const TaskList = memo<TaskListProps>(({ tasks = [], taskCounts = {} as TaskCounts, refreshTasks }) => {
+const TaskList = memo<TaskListProps>(({ tasks = [], taskCounts = {} as TaskCounts, refreshTasks, isLoading = false }) => {
   const containerRef = useRef<HTMLDivElement>(null);
   const hasAnimatedRef = useRef(false);
   
@@ -25,7 +29,7 @@ const TaskList = memo<TaskListProps>(({ tasks = [], taskCounts = {} as TaskCount
   const failedTasks = tasks.filter(task => task.status === 'failed');
 
   useGSAP(() => {
-    if (hasAnimatedRef.current || !containerRef.current) return;
+    if (isLoading || hasAnimatedRef.current || !containerRef.current) return;
     hasAnimatedRef.current = true;
     const ctx = gsap.context(() => {
       const tl1 = gsap.timeline();
@@ -38,7 +42,7 @@ const TaskList = memo<TaskListProps>(({ tasks = [], taskCounts = {} as TaskCount
       gsap.from(".taskNumberBubble", { scale: 0, duration: 0.6, translateX: "-145px", translateY: "-50px", stagger: 0.1 });
     }, containerRef);
     return () => ctx.revert();
-  }, []);
+  }, [isLoading]);
 
   const EmptyState = () => (
     <div className={styles.emptyState}>
@@ -67,6 +71,32 @@ const TaskList = memo<TaskListProps>(({ tasks = [], taskCounts = {} as TaskCount
       {children}
     </div>
   );
+
+  if (isLoading) {
+    return (
+      <div
+        ref={containerRef}
+        className={styles.container}
+        role="status"
+        aria-busy="true"
+        aria-label="Loading tasks"
+      >
+        {/* Count bubble placeholder — matches .countBubble 290×100 / 35px radii */}
+        <Skeleton
+          tone="surface"
+          width={290}
+          height={100}
+          borderRadius="0 35px 35px 35px"
+        />
+        <TaskRow>
+          <TaskCardSkeleton />
+          <TaskCardSkeleton />
+          <TaskCardSkeleton />
+          <TaskCardSkeleton />
+        </TaskRow>
+      </div>
+    );
+  }
 
   return (
     <div ref={containerRef} className={styles.container}>
