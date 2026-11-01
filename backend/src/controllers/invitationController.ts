@@ -3,55 +3,65 @@ import { Request, Response } from 'express';
 import pool from '../config/database';
 import socketService from '../services/socketService';
 
+// Simple shape check only; the real check is that the account exists.
+const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
+// How long an admin must wait to re-invite an employee who declined.
+const REINVITE_COOLDOWN_MS = 7 * 24 * 60 * 60 * 1000;
+
 class InvitationController {
-  // Admin sends an invitation to an employee
+  // Admin sends an invitation to an employee, identified by exact email.
+  // There is deliberately no "browse all employees" endpoint: an admin can only
+  // invite someone whose email they already know.
   static async sendInvitation(req: Request, res: Response): Promise<void> {
     try {
       const adminId = req.user.id;
-      const { employeeId } = req.body;
+      const email = typeof req.body.email === 'string' ? req.body.email.trim().toLowerCase() : '';
 
-      if (!employeeId) {
+      if (!email || email.length > 255 || !EMAIL_PATTERN.test(email)) {
         res.status(400).json({
           success: false,
-          error: 'employeeId is required'
+          error: 'A valid email address is required'
         });
         return;
       }
 
       // Verify the target user is an active employee
       const employeeCheck = await pool.query(
-        'SELECT id, first_name FROM users WHERE id = $1 AND role = $2 AND is_active = true',
-        [employeeId, 'employee']
+        'SELECT id, first_name FROM users WHERE LOWER(email) = $1 AND role = $2 AND is_active = true',
+        [email, 'employee']
       );
 
       if (employeeCheck.rows.length === 0) {
         res.status(404).json({
           success: false,
-          error: 'Employee not found'
+          error: 'No employee account found with that email'
         });
         return;
       }
 
-      // Check if this employee already accepted another admin's invitation
+      const employeeId: number = employeeCheck.rows[0].id;
+
+      // Check if this employee already accepted another admin's invitation.
+      // Don't reveal which admin's team they are on.
       const existingTeam = await pool.query(
-        `SELECT ti.admin_id, u.first_name as admin_name 
-         FROM team_invitations ti 
-         JOIN users u ON ti.admin_id = u.id
-         WHERE ti.employee_id = $1 AND ti.status = 'accepted'`,
+        `SELECT admin_id FROM team_invitations
+         WHERE employee_id = $1 AND status = 'accepted'`,
         [employeeId]
       );
 
       if (existingTeam.rows.length > 0) {
+        const onThisTeam = existingTeam.rows.some(r => r.admin_id === adminId);
         res.status(400).json({
           success: false,
-          error: `This employee is already on ${existingTeam.rows[0].admin_name}'s team`
+          error: onThisTeam ? 'This employee is already on your team' : 'This employee is already on another team'
         });
         return;
       }
 
       // Check if an invitation already exists from this admin to this employee
       const existingInvite = await pool.query(
-        'SELECT id, status FROM team_invitations WHERE admin_id = $1 AND employee_id = $2',
+        'SELECT id, status, responded_at FROM team_invitations WHERE admin_id = $1 AND employee_id = $2',
         [adminId, employeeId]
       );
 
@@ -64,8 +74,19 @@ class InvitationController {
           });
           return;
         }
-        // If previously rejected, allow re-sending by updating the existing record
+        // If previously rejected, allow re-sending by updating the existing record,
+        // but only after a cooldown so an employee can't be spammed with re-invites.
         if (existing.status === 'rejected') {
+          const respondedAt = existing.responded_at ? new Date(existing.responded_at).getTime() : 0;
+          const retryAt = respondedAt + REINVITE_COOLDOWN_MS;
+          if (Date.now() < retryAt) {
+            res.status(429).json({
+              success: false,
+              error: `This employee declined your invitation. You can invite them again after ${new Date(retryAt).toDateString()}.`
+            });
+            return;
+          }
+
           const updated = await pool.query(
             `UPDATE team_invitations 
              SET status = 'pending', responded_at = NULL, created_at = CURRENT_TIMESTAMP
@@ -253,40 +274,6 @@ class InvitationController {
       res.status(500).json({
         success: false,
         error: 'Failed to fetch team members'
-      });
-    }
-  }
-
-  // Admin gets employees not yet on any team (available to invite)
-  static async getAvailableEmployees(req: Request, res: Response): Promise<void> {
-    try {
-      const adminId = req.user.id;
-
-      const result = await pool.query(
-        `SELECT u.id, u.first_name, u.email
-         FROM users u
-         WHERE u.role = 'employee' AND u.is_active = true
-           AND u.id NOT IN (
-             SELECT employee_id FROM team_invitations 
-             WHERE status = 'accepted'
-           )
-           AND u.id NOT IN (
-             SELECT employee_id FROM team_invitations 
-             WHERE admin_id = $1 AND status = 'pending'
-           )
-         ORDER BY u.first_name`,
-        [adminId]
-      );
-
-      res.json({
-        success: true,
-        data: result.rows
-      });
-    } catch (error) {
-      console.error('Get available employees error:', error);
-      res.status(500).json({
-        success: false,
-        error: 'Failed to fetch available employees'
       });
     }
   }

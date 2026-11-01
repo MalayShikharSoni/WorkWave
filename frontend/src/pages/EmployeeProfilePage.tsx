@@ -6,6 +6,7 @@ import type { EmployeeStats } from '../types';
 import HeaderUser from './HeaderUser';
 import AvatarUpload from '../components/AvatarUpload/AvatarUpload';
 import TaskCommentsModal from '../components/TaskList/TaskCommentsModal';
+import { safeHttpsUrl } from '../utils/safeUrl';
 import { useGSAP } from '@gsap/react';
 import gsap from 'gsap';
 import {
@@ -122,6 +123,8 @@ const EmployeeProfilePage: React.FC = () => {
   }
 
   const { employee, monthlyTrend, priorityBreakdown, currentTasks } = stats;
+  // Never render a non-https user-supplied URL as a link (blocks javascript: URLs)
+  const linkedInHref = safeHttpsUrl(employee.linkedin_url);
 
   const pieData = [
     { name: 'completed', value: stats.completedTasks },
@@ -158,9 +161,9 @@ const EmployeeProfilePage: React.FC = () => {
                   {employee.phone}
                 </div>
               )}
-              {employee.linkedin_url && (
+              {linkedInHref && (
                 <div className={styles.metaItem}>
-                  <a href={employee.linkedin_url} target="_blank" rel="noopener noreferrer" style={{ color: 'inherit', textDecoration: 'none', display: 'flex', alignItems: 'center', gap: '5px' }}>
+                  <a href={linkedInHref} target="_blank" rel="noopener noreferrer" style={{ color: 'inherit', textDecoration: 'none', display: 'flex', alignItems: 'center', gap: '5px' }}>
                     <svg width="18" height="18" viewBox="0 0 24 24" fill="none" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M16 8a6 6 0 0 1 6 6v7h-4v-7a2 2 0 0 0-2-2 2 2 0 0 0-2 2v7h-4v-7a6 6 0 0 1 6-6z"></path><rect x="2" y="9" width="4" height="12"></rect><circle cx="4" cy="4" r="2"></circle></svg>
                     LinkedIn
                   </a>

@@ -18,7 +18,6 @@ const Login: React.FC = () => {
     try {
       const result = await login(email, password);
       if (result.success) {
-        console.log("Login successful:", result.user);
         setEmail(""); setPassword("");
         if (result.user?.role === "admin") { navigate("/admin-dashboard"); } else { navigate("/employee-dashboard"); }
       } else { setError(result.error || "Login failed"); }

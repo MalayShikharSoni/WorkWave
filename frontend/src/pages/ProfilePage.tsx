@@ -83,7 +83,8 @@ const ProfilePage: React.FC = () => {
       }
     } catch (error) {
       console.error('Failed to update profile:', error);
-      alert('Failed to update profile.');
+      const err = error as { response?: { data?: { error?: string } } };
+      alert(err.response?.data?.error || 'Failed to update profile.');
     } finally {
       setIsSaving(false);
     }
@@ -196,6 +197,9 @@ const ProfilePage: React.FC = () => {
                   className={styles.input}
                   value={formData.linkedin_url}
                   onChange={handleChange}
+                  maxLength={255}
+                  pattern="https://(www\.)?([a-z]{2,3}\.)?linkedin\.com/.*"
+                  title="An https://linkedin.com/... link"
                   placeholder="https://linkedin.com/in/username"
                 />
               </div>

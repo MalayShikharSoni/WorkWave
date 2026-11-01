@@ -221,6 +221,10 @@
   background: transparent;
 }
 
+.inviteInputWrap {
+  flex: 1;
+}
+
 .searchIcon {
   position: absolute;
   left: 1rem;

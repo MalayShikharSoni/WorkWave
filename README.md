@@ -158,7 +158,7 @@ erDiagram
 | Module | Frontend experience | Backend responsibilities | Primary data |
 | --- | --- | --- | --- |
 | Accounts and profiles | Login, signup, profile editing, avatar upload | Authentication, token refresh/rotation, profile updates, uploads | `users`, `refresh_tokens` |
-| Team management | Invite employees and view team membership | Invitation rules and team queries | `team_invitations`, `users` |
+| Team management | Invite employees by email and view team membership | Invitation rules and team queries | `team_invitations`, `users` |
 | Individual tasks | Create, assign, accept, complete, fail, comment, and attach files | Task lifecycle, participant access, file handling, event emission | `tasks`, `task_comments`, `task_attachments` |
 | Notifications | Notification panel, unread state, live toasts | Persist, deliver, and mark notifications read | `notifications` |
 | Insights and recognition | Employee profile statistics, analytics, leaderboard, EOM history | Aggregate task metrics and archive recognition | `tasks`, `eom_records` |
@@ -303,15 +303,17 @@ For the route-by-route contract and authorization behavior, see [`docs/audit/02-
 
 ## Deployment notes
 
-- The frontend includes a Vercel SPA rewrite in [`frontend/vercel.json`](frontend/vercel.json).
+- The frontend includes a Vercel SPA rewrite and security headers (including a Content-Security-Policy) in [`frontend/vercel.json`](frontend/vercel.json).
+- The CSP's `connect-src` allows only the deployed API origin. If the backend URL changes, update it in `vercel.json` as well as `VITE_API_URL`, or the browser will block API and socket calls.
 - Build the API with `npm run build` in `backend/`, then run `npm start` to serve `dist/index.js`.
 - Set the frontend's `VITE_API_URL` to the deployed API URL including `/api`.
 - Before deploying a frontend to a new origin, add that origin to the backend CORS allowlist in [`backend/src/index.ts`](backend/src/index.ts).
+- After deploying schema-related changes, re-run `npx ts-node src/config/migration.ts` against the production database (it is idempotent).
 - Provision PostgreSQL and Cloudinary credentials in the deployment environment; never expose backend secrets in Vite variables or commit `.env` files.
 
 ## Additional documentation
 
-The [`docs/audit/`](docs/audit/) directory is the repository's implementation audit. It covers the current architecture, database schema, authentication flow, real-time events, frontend structure, configuration, and known gaps. It is the best reference when extending or operating the application.
+The [`docs/audit/`](docs/audit/) directory is the repository's implementation audit. It covers the current architecture, database schema, authentication flow, real-time events, frontend structure, configuration, and known gaps. It was written in July 2026; [`docs/audit/00-STATUS.md`](docs/audit/00-STATUS.md) lists what has been fixed since. It is the best reference when extending or operating the application.
 
 ## License
 

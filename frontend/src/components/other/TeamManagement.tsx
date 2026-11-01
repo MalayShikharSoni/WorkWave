@@ -1,57 +1,39 @@
-import React, { useState, useEffect, useCallback, useMemo, useRef } from "react";
+import React, { useState, useEffect, useCallback } from "react";
 import { invitationAPI } from "../../services/api";
-import type { TeamMember, Employee, PendingInvitation } from "../../types";
+import type { TeamMember, PendingInvitation } from "../../types";
 import AvatarUpload from "../AvatarUpload/AvatarUpload";
 import styles from "./TeamManagement.module.css";
 
 const TeamManagement: React.FC = () => {
     const [teamMembers, setTeamMembers] = useState<TeamMember[]>([]);
-    const [availableEmployees, setAvailableEmployees] = useState<Employee[]>([]);
     const [pendingInvitations, setPendingInvitations] = useState<PendingInvitation[]>([]);
-    const [selectedEmployee, setSelectedEmployee] = useState<Employee | null>(null);
-    const [searchQuery, setSearchQuery] = useState("");
-    const [isSearchFocused, setIsSearchFocused] = useState(false);
+    const [inviteEmail, setInviteEmail] = useState("");
     const [isLoading, setIsLoading] = useState(true);
     const [isSending, setIsSending] = useState(false);
     const [error, setError] = useState("");
     const [successMsg, setSuccessMsg] = useState("");
-    const searchContainerRef = useRef<HTMLDivElement>(null);
 
     const fetchData = useCallback(async () => {
         try {
             setIsLoading(true);
-            const [teamRes, availableRes, pendingRes] = await Promise.all([
-                invitationAPI.getTeamMembers(), invitationAPI.getAvailableEmployees(), invitationAPI.getPendingInvitations(),
+            const [teamRes, pendingRes] = await Promise.all([
+                invitationAPI.getTeamMembers(), invitationAPI.getPendingInvitations(),
             ]);
-            setTeamMembers(teamRes.data.data); setAvailableEmployees(availableRes.data.data); setPendingInvitations(pendingRes.data.data);
+            setTeamMembers(teamRes.data.data); setPendingInvitations(pendingRes.data.data);
         } catch (err) { console.error("Failed to fetch team data:", err); setError("Failed to load team data."); }
         finally { setIsLoading(false); }
     }, []);
 
     useEffect(() => { fetchData(); }, [fetchData]);
-    useEffect(() => {
-        const handleClickOutside = (e: MouseEvent) => {
-            if (searchContainerRef.current && !searchContainerRef.current.contains(e.target as Node)) { setIsSearchFocused(false); }
-        };
-        document.addEventListener("mousedown", handleClickOutside);
-        return () => document.removeEventListener("mousedown", handleClickOutside);
-    }, []);
 
-    const filteredEmployees = useMemo(() => {
-        if (!searchQuery.trim()) return availableEmployees;
-        const q = searchQuery.toLowerCase();
-        return availableEmployees.filter((emp) => emp.first_name?.toLowerCase().includes(q) || emp.email?.toLowerCase().includes(q));
-    }, [searchQuery, availableEmployees]);
-
-    const handleSelectEmployee = (emp: Employee) => { setSelectedEmployee(emp); setSearchQuery(""); setIsSearchFocused(false); };
-    const handleClearSelection = () => { setSelectedEmployee(null); setSearchQuery(""); };
-
-    const handleSendInvitation = async () => {
-        if (!selectedEmployee) return;
+    const handleSendInvitation = async (e: React.FormEvent<HTMLFormElement>) => {
+        e.preventDefault();
+        const email = inviteEmail.trim();
+        if (!email) return;
         setIsSending(true); setError(""); setSuccessMsg("");
         try {
-            const res = await invitationAPI.sendInvitation(selectedEmployee.id);
-            setSuccessMsg(res.data.message || "Invitation sent!"); setSelectedEmployee(null); setSearchQuery(""); await fetchData();
+            const res = await invitationAPI.sendInvitation(email);
+            setSuccessMsg(res.data.message || "Invitation sent!"); setInviteEmail(""); await fetchData();
         } catch (err: unknown) {
             const e = err as { response?: { data?: { error?: string } } };
             setError(e.response?.data?.error || "Failed to send invitation");
@@ -145,62 +127,23 @@ const TeamManagement: React.FC = () => {
                 {successMsg && (<div className={styles.successMsg}>{successMsg}</div>)}
                 <div className={styles.inviteBox}>
                     <div className={styles.inviteTitle}>Invite an Employee</div>
-                    {availableEmployees.length === 0 ? (
-                        <p className={styles.noEmployees}>No available employees to invite right now.</p>
-                    ) : (
-                        <div className={styles.inviteContent}>
-                            {selectedEmployee && (
-                                <div className={styles.selectedRow}>
-                                    <div className={styles.selectedInfo}>
-                                        <div className={styles.avatar}>
-                                            <AvatarUpload currentAvatarUrl={selectedEmployee.avatar_url} name={selectedEmployee.first_name || ''} size={40} readOnly />
-                                        </div>
-                                        <div className={styles.selectedDetails}>
-                                            <span className={styles.selectedName}>{selectedEmployee.first_name}</span>
-                                            <span className={styles.selectedEmail}>{selectedEmployee.email}</span>
-                                        </div>
-                                        <button onClick={handleClearSelection} className={styles.clearBtn} title="Clear selection">×</button>
-                                    </div>
-                                    <button onClick={handleSendInvitation} disabled={isSending} className={styles.sendBtn}>
-                                        {isSending ? "Sending..." : "Send Invite"}
-                                    </button>
-                                </div>
-                            )}
-                            {!selectedEmployee && (
-                                <div ref={searchContainerRef} className={styles.searchContainer}>
-                                    <div className={styles.searchWrap}>
-                                        <svg className={styles.searchIcon} width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#9c815a" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-                                            <circle cx="11" cy="11" r="8" /><line x1="21" y1="21" x2="16.65" y2="16.65" />
-                                        </svg>
-                                        <input type="text" value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)} onFocus={() => setIsSearchFocused(true)}
-                                            placeholder="Search by name or email..." disabled={isSending}
-                                            className={styles.searchInput} />
-                                    </div>
-                                    {isSearchFocused && searchQuery.trim().length > 0 && (
-                                        <div className={styles.dropdown}
-                                             style={{ scrollbarWidth: 'thin', scrollbarColor: '#ad9676 #cec0ad' }}>
-                                            {filteredEmployees.length === 0 ? (
-                                                <div className={styles.noResults}>No employees match your search</div>
-                                            ) : (
-                                                filteredEmployees.map((emp) => (
-                                                    <button key={emp.id} onClick={() => handleSelectEmployee(emp)}
-                                                        className={styles.dropdownItem}>
-                                                        <div className={styles.avatar}>
-                                                            <AvatarUpload currentAvatarUrl={emp.avatar_url} name={emp.first_name || ''} size={32} readOnly />
-                                                        </div>
-                                                        <div className={styles.selectedDetails}>
-                                                            <span className={styles.dropdownName}>{emp.first_name}</span>
-                                                            <span className={styles.dropdownEmail}>{emp.email}</span>
-                                                        </div>
-                                                    </button>
-                                                ))
-                                            )}
-                                        </div>
-                                    )}
-                                </div>
-                            )}
+                    <form onSubmit={handleSendInvitation} className={styles.inviteContent}>
+                        <div className={styles.selectedRow}>
+                            <div className={`${styles.searchWrap} ${styles.inviteInputWrap}`}>
+                                <svg className={styles.searchIcon} width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#9c815a" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                                    <path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z" /><polyline points="22,6 12,13 2,6" />
+                                </svg>
+                                <input type="email" value={inviteEmail} onChange={(e) => setInviteEmail(e.target.value)}
+                                    placeholder="Employee's email address" disabled={isSending} required
+                                    aria-label="Employee email address" autoComplete="off"
+                                    className={styles.searchInput} />
+                            </div>
+                            <button type="submit" disabled={isSending || !inviteEmail.trim()} className={styles.sendBtn}>
+                                {isSending ? "Sending..." : "Send Invite"}
+                            </button>
                         </div>
-                    )}
+                        <p className={styles.noEmployees}>Enter the exact email the employee signed up with.</p>
+                    </form>
                 </div>
                 {pendingInvitations.length > 0 && (
                     <div className={styles.pendingSection}>

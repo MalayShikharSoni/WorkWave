@@ -206,6 +206,20 @@ async function migrate(): Promise<void> {
     `);
     console.log(`Soft-revoked ${revokedLegacy.rowCount ?? 0} legacy raw refresh token(s).`);
 
+    console.log('Running migration: Clearing unsafe linkedin_url values...');
+    // Profile links are rendered as <a href>. Anything that isn't an https
+    // LinkedIn URL (e.g. a stored javascript: URL) is cleared. The API now
+    // rejects such values, so this only affects data saved before that check.
+    // Idempotent: safe to re-run.
+    const clearedLinks = await pool.query(`
+      UPDATE users
+      SET linkedin_url = NULL
+      WHERE linkedin_url IS NOT NULL
+        AND linkedin_url <> ''
+        AND linkedin_url !~* '^https://([a-z0-9-]+\\.)*linkedin\\.com(/|$)';
+    `);
+    console.log(`Cleared ${clearedLinks.rowCount ?? 0} unsafe linkedin_url value(s).`);
+
     console.log('All migrations completed successfully');
     process.exit(0);
   } catch (error) {

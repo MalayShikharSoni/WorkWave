@@ -6,6 +6,7 @@ import pool from '../config/database';
 import cloudinary from '../config/cloudinary';
 import streamifier from 'streamifier';
 import socketService from '../services/socketService';
+import { canAccessTask } from '../utils/authz';
 
 const ALLOWED_FILE_TYPES = [
   'image/jpeg',
@@ -470,7 +471,7 @@ class TaskController {
         return;
       }
 
-      if (task.created_by !== userId && task.assigned_to !== userId) {
+      if (!canAccessTask(task, userId)) {
         res.status(403).json({ success: false, error: 'You do not have access to this task' });
         return;
       }
@@ -487,10 +488,35 @@ class TaskController {
     }
   }
 
-  // Delete an attachment (Admin only)
+  // Delete an attachment (Admin only, and only on tasks the admin created)
   static async deleteAttachment(req: Request, res: Response): Promise<void> {
     try {
-      const attachmentId = req.params.attachmentId as string;
+      const taskId = Number(req.params.taskId);
+      const attachmentId = Number(req.params.attachmentId);
+      const userId = req.user.id;
+
+      if (!Number.isInteger(taskId) || !Number.isInteger(attachmentId)) {
+        res.status(400).json({ success: false, error: 'Invalid task or attachment ID' });
+        return;
+      }
+
+      // The attachment must belong to the task in the URL...
+      const attachment = await Attachment.getById(attachmentId);
+      if (!attachment || attachment.task_id !== taskId) {
+        res.status(404).json({ success: false, error: 'Attachment not found' });
+        return;
+      }
+
+      // ...and that task must belong to the requesting admin
+      const task = await Task.getById(taskId);
+      if (!task) {
+        res.status(404).json({ success: false, error: 'Task not found' });
+        return;
+      }
+      if (task.created_by !== userId) {
+        res.status(403).json({ success: false, error: 'Only the task creator can delete attachments' });
+        return;
+      }
 
       const deleted = await Attachment.delete(attachmentId);
 

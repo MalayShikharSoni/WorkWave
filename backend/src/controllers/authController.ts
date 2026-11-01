@@ -6,6 +6,7 @@ import User from '../models/userModel';
 import pool from '../config/database';
 import cloudinary from '../config/cloudinary';
 import streamifier from 'streamifier';
+import { validateProfileInput } from '../utils/profileValidation';
 
 // Refresh tokens are stored HASHED so a DB leak does not expose usable bearer
 // credentials (previously the raw JWT was stored, effectively plaintext). We use
@@ -331,11 +332,13 @@ class AuthController {
 
   static async updateProfile(req: Request, res: Response): Promise<void> {
     try {
-      const { first_name, bio, phone, designation, department, linkedin_url } = req.body;
-      
-      await User.updateProfile(req.user.id, {
-        first_name, bio, phone, designation, department, linkedin_url
-      });
+      const result = validateProfileInput(req.body ?? {});
+      if (result.error !== undefined) {
+        res.status(400).json({ success: false, error: result.error });
+        return;
+      }
+
+      await User.updateProfile(req.user.id, result.data);
 
       res.json({
         success: true,

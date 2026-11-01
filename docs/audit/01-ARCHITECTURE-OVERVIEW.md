@@ -48,7 +48,7 @@ ems/
 There is **no** `docs/` (before this audit), **no** `/SRS`, **no** planning documents,
 **no** Dockerfile, **no** `.github/workflows`, and **no** CI configuration anywhere in the
 repo. The only "specification" artifacts are three `README.md` files (root, `frontend/`,
-`frontend-next/`), and two of those contradict each other (see `09-CLAIMS-VS-REALITY.md`).
+`frontend-next/`), and two of those contradict each other.
 
 ---
 
@@ -58,7 +58,7 @@ repo. The only "specification" artifacts are three `README.md` files (root, `fro
 backend/
 ├── package.json               # Deps: express 5, pg, socket.io, jsonwebtoken, bcryptjs,
 │                              #       cloudinary, multer, node-cron, helmet, cors,
-│                              #       express-rate-limit, morgan, winston, streamifier
+│                              #       express-rate-limit, winston, streamifier
 ├── tsconfig.json              # CommonJS, target ES2020, strict: true
 ├── ts-err.txt                 # ⚠️ COMMITTED BUILD-ERROR DUMP (see §6)
 ├── .gitignore
@@ -207,10 +207,10 @@ Note the somewhat arbitrary split between `components/` and `pages/`: `HeaderUse
 | cors | ✅ | ✅ | `index.ts:32` |
 | express-rate-limit | ✅ | ✅ | `index.ts:50` |
 | dotenv | ✅ | ✅ | multiple |
-| **morgan** | ✅ | ❌ **UNUSED** | No import anywhere in `src/` |
+| ~~morgan~~ | — | 🗑️ Removed (Nov 2026) | Was unused |
 | **winston** | ✅ | ❌ **UNUSED** | No import anywhere in `src/`; logging is raw `console.*` |
 
-So the backend claims structured logging (winston) and HTTP request logging (morgan) via
+So the backend claimed structured logging (winston) and HTTP request logging (morgan, since removed) via
 dependencies, but **all logging in practice is `console.log` / `console.error`** (see
 `errorHandler.ts:29`, and dozens of `console.error` in controllers).
 

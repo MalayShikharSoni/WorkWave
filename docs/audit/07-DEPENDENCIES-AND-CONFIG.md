@@ -24,10 +24,10 @@
 | cors | ^2.8.6 | ✅ | `index.ts` |
 | express-rate-limit | ^8.2.1 | ✅ **(1 file)** | only `index.ts` |
 | dotenv | ^17.2.4 | ✅ | `dotenv.config()` called in 3 files |
-| **morgan** | ^1.10.1 | ❌ **UNUSED** | No import in `src/`. Dead dependency. |
+| ~~morgan~~ | — | 🗑️ **Removed (Nov 2026)** | Was unused, and had a known vulnerability. `@types/morgan` removed too. |
 | **winston** | ^3.19.0 | ❌ **UNUSED** | No import in `src/`. Logging is raw `console.*`. Dead dependency. |
 
-**Unused/removable:** `morgan`, `winston`.
+**Unused/removable:** `winston` (`morgan` was removed in Nov 2026).
 **Single-file deps** (fine, just noting): `node-cron`, `express-rate-limit`, `streamifier`.
 
 ### 1.2 Dev deps of note
@@ -41,7 +41,7 @@
 | **@types/socket.io** | ^3.0.1 | ⚠️ **Deprecated & wrong** — `socket.io` v3+ ships its own types; the standalone `@types/socket.io` is a deprecated stub and should be removed. |
 | @types/bcryptjs | ^2.4.6 | `bcryptjs` 3.x ships its own types; this `@types` package is redundant/mismatched (types for v2). |
 | @types/express | ^5.0.6 | matches Express 5 |
-| @types/node-cron, @types/multer, @types/pg, @types/cors, @types/jsonwebtoken, @types/morgan, @types/streamifier | — | `@types/morgan` is dead (morgan unused). |
+| @types/node-cron, @types/multer, @types/pg, @types/cors, @types/jsonwebtoken, @types/streamifier | — | fine |
 
 ### 1.3 No test tooling
 
@@ -132,11 +132,14 @@ Tailwind→CSS-modules migration (`git 066bd16`). One of these files should be d
 Minimal — just `@vitejs/plugin-react`. No path aliases, no proxy, no env plumbing.
 
 ### 5.4 `frontend/vercel.json`
-```json
-{ "rewrites": [ { "source": "/(.*)", "destination": "/" } ] }
-```
-SPA fallback so client-side routes resolve to `index.html`. This is the **only** deployment
-config in the repo.
+- **Rewrite:** `/(.*)` → `/`. SPA fallback so client-side routes resolve to `index.html`.
+- **Headers (added Nov 2026):** Content-Security-Policy, `X-Frame-Options`,
+  `X-Content-Type-Options`, `Referrer-Policy`, `Permissions-Policy` and HSTS on every route.
+  See doc 04 §6a.
+- The CSP's `connect-src` hard-codes the API origin (`https://workwave-d9ys.onrender.com` and
+  its `wss://` form), so **changing the backend URL requires updating `vercel.json`**.
+
+This is the **only** deployment config in the repo.
 
 ---
 
@@ -199,7 +202,7 @@ config in the repo.
 
 | Issue | Detail |
 |-------|--------|
-| Unused backend deps | `morgan`, `winston` (+ their `@types`) |
+| Unused backend deps | `winston` (`morgan` removed Nov 2026) |
 | Unused frontend deps | `@mui/material`, `@mui/icons-material`, `@emotion/react`, `@emotion/styled`, `path-browserify` |
 | Wrong/deprecated types | `@types/socket.io` (deprecated), `@types/bcryptjs` (v2 types for a v3 lib) |
 | Version skew | TypeScript 6.x (frontend) vs 5.x (backend/next); React 18 vs 19 across the three frontends; @mui 6 vs 7 |
