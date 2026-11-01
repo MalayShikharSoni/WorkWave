@@ -21,7 +21,6 @@ const Signup: React.FC = () => {
     try {
       const result = await register(email, password, firstname, role);
       if (result.success) {
-        console.log("Signup successful:", result.user);
         setFirstname(""); setEmail(""); setPassword("");
         alert("Signup successful! Welcome to WorkWave!");
         if (result.user?.role === "admin") { navigate("/admin-dashboard"); } else { navigate("/employee-dashboard"); }

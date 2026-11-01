@@ -3,6 +3,7 @@ import { Request, Response } from 'express';
 import Comment from '../models/commentModel';
 import Task from '../models/taskModel';
 import socketService from '../services/socketService';
+import { canAccessTask } from '../utils/authz';
 
 class CommentController {
   static async getComments(req: Request, res: Response): Promise<void> {
@@ -17,8 +18,8 @@ class CommentController {
         return;
       }
       
-      // Ensure user has access to this task
-      if (req.user.role === 'employee' && task.assigned_to !== userId) {
+      // Only the task's creator (admin) and assignee (employee) may see its thread
+      if (!canAccessTask(task, userId)) {
         res.status(403).json({ success: false, error: 'Access denied' });
         return;
       }
@@ -48,7 +49,7 @@ class CommentController {
         return;
       }
 
-      if (req.user.role === 'employee' && task.assigned_to !== userId) {
+      if (!canAccessTask(task, userId)) {
         res.status(403).json({ success: false, error: 'Access denied' });
         return;
       }
@@ -79,10 +80,12 @@ class CommentController {
 
   static async deleteComment(req: Request, res: Response): Promise<void> {
     try {
+      const taskId = req.params.taskId as string;
       const commentId = req.params.commentId as string;
       const userId = req.user.id;
 
-      const deleted = await Comment.delete(commentId, userId);
+      // Scoped to author AND task, so a comment can't be removed via an unrelated task URL
+      const deleted = await Comment.delete(commentId, taskId, userId);
       if (!deleted) {
         res.status(403).json({ success: false, error: 'Comment not found or access denied' });
         return;

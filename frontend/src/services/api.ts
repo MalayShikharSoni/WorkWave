@@ -117,16 +117,14 @@ export const taskAPI = {
 
 // Invitation API
 export const invitationAPI = {
-  sendInvitation: (employeeId: number): Promise<AxiosResponse<APIResponse<Invitation>>> =>
-    api.post('/invitations/send', { employeeId }),
+  sendInvitation: (email: string): Promise<AxiosResponse<APIResponse<Invitation>>> =>
+    api.post('/invitations/send', { email }),
   respondToInvitation: (id: number, status: string): Promise<AxiosResponse<APIResponse<Invitation>>> =>
     api.put(`/invitations/respond/${id}`, { status }),
   getMyInvitations: (): Promise<AxiosResponse<APIResponse<Invitation[]>>> =>
     api.get('/invitations/my-invitations'),
   getTeamMembers: (): Promise<AxiosResponse<APIResponse<TeamMember[]>>> =>
     api.get('/invitations/team'),
-  getAvailableEmployees: (): Promise<AxiosResponse<APIResponse<Employee[]>>> =>
-    api.get('/invitations/available-employees'),
   getPendingInvitations: (): Promise<AxiosResponse<APIResponse<PendingInvitation[]>>> =>
     api.get('/invitations/pending'),
 };

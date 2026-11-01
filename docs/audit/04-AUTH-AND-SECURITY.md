@@ -208,11 +208,16 @@ api.interceptors.response.use((r) => r, async (error) => {
 
 **Assessment:**
 - ❌ **`localStorage` tokens are readable by any JavaScript on the page → XSS = full token
-  theft** (both access and refresh). No httpOnly cookie option is used anywhere. This is the
-  single biggest client-side auth risk.
-- ⚠️ **No refresh de-duplication / mutex.** If several requests 401 simultaneously, each fires
-  its own `/auth/refresh`. Since the refresh token isn't rotated, this "works," but it would
-  break the moment rotation were added.
+  theft** (both access and refresh). No httpOnly cookie option is used anywhere. This is still
+  the biggest client-side auth risk.
+  - *(Nov 2026)* Partly mitigated by the strict `script-src 'self'` CSP (§6a).
+  - Planned fix: move the refresh token to an `httpOnly; Secure` cookie. That needs the
+    frontend and API on the same site (a custom domain, or proxying `/api` through Vercel),
+    because browsers block cookies set by a different site.
+- *(Fixed)* Refresh is now **single-flight** (`services/tokenRefresh.ts`), shared by the Axios
+  interceptor and the socket client. This matters because refresh tokens now rotate.
+- *(Fixed Nov 2026)* `AuthProvider` no longer logs token previews or user details to the
+  console.
 - ⚠️ Refresh failures hard-redirect via `window.location.href = '/login'` (full page reload),
   bypassing the router.
 
@@ -223,6 +228,32 @@ api.interceptors.response.use((r) => r, async (error) => {
 - **No cookies are used at all.** No `cookie-parser`, no `Set-Cookie`, no CSRF tokens. All auth
   is Bearer-header + localStorage. (This sidesteps CSRF but maximizes XSS exposure.)
 - No server-side session store beyond the `refresh_tokens` table.
+
+---
+
+## 6a. Frontend security headers *(added Nov 2026)*
+
+`frontend/vercel.json` sends these headers on every route:
+
+| Header | Value / purpose |
+|---|---|
+| `Content-Security-Policy` | `script-src 'self'` (no inline or third-party scripts); `connect-src` limited to `'self'` and the API origin `https://workwave-d9ys.onrender.com` (plus `wss://` for Socket.IO); images from `'self'`, `data:`, Cloudinary and GitHub avatars; fonts from Google Fonts; `object-src 'none'`, `base-uri 'self'`, `form-action 'self'`, `frame-ancestors 'none'`, `upgrade-insecure-requests` |
+| `X-Frame-Options` | `DENY` (clickjacking, for older browsers) |
+| `X-Content-Type-Options` | `nosniff` |
+| `Referrer-Policy` | `strict-origin-when-cross-origin` |
+| `Permissions-Policy` | camera, microphone, geolocation and payment disabled |
+| `Strict-Transport-Security` | 2 years, include subdomains |
+
+Notes:
+- **If the API URL changes, update `connect-src` in `vercel.json`**, or the browser will block
+  every API and socket call.
+- `style-src` allows `'unsafe-inline'`, because react-toastify v11 injects its stylesheet as a
+  `<style>` tag at runtime. Inline styles can't run script, so the main XSS protection
+  (`script-src 'self'`) is unaffected.
+- The policy was checked in headless Chrome against a production build served with these exact
+  headers: no violations on `/`, `/login`, `/signup` or `/admin-dashboard`.
+- Profile links are also defended directly: the API only accepts `https://` LinkedIn URLs, and
+  `EmployeeProfilePage` only renders an `href` that passes `utils/safeUrl.ts`.
 
 ---
 
@@ -378,19 +409,28 @@ return await bcrypt.compare(plainPassword, hashedPassword); // verify
 
 ## 13. Consolidated security findings (blunt)
 
-| # | Severity | Finding |
-|---|----------|---------|
-| S1 | **High** | Broken authorization / IDOR: `deleteTask` doesn't check task ownership (`taskController.ts:333`); admins can delete any task system-wide. |
-| S2 | **High** | Broken authorization / IDOR in groups: `getGroupTasks`, `getGroupProgress`, `getGithubStats`, `updateTaskStatus` have no ownership/membership checks (`groupController.ts:132,144,184,208`). Any user can read/modify any group's data by ID. |
-| S3 | **High** | `getAllTasks` returns every task in the DB to any admin, not scoped to their team (`taskController.ts:151`, `taskModel.ts:94`). Cross-tenant leak. |
-| S4 | **High** | Tokens in `localStorage` → any XSS steals both access and refresh tokens. |
-| S5 | **Medium** | EOM `score` and `snapshot_stats` are taken from client input and stored unverified (`leaderboardModel.ts:144-156`) — forgeable "Employee of the Month". |
-| S6 | **Medium** | No refresh-token rotation or reuse detection; 7-day stolen-token window. |
-| S7 | **Medium** | No brute-force protection on login (shares the generic 100/15min limiter). |
-| S8 | **Medium** | Socket auth token never re-validated on long-lived connections. |
-| S9 | **Medium** | `ssl: { rejectUnauthorized: false }` on the Postgres connection (no cert verification). |
-| S10 | **Low/Med** | No input validation framework: register accepts empty/weak passwords and unvalidated emails; profile update accepts arbitrary strings. |
-| S11 | **Low** | Refresh tokens stored in plaintext; `refresh_tokens` never pruned (unbounded growth). |
-| S12 | **Low** | CORS origins + socket CORS origins hardcoded and duplicated in two files. |
-| S13 | **Low** | `admin` can view any employee's stats regardless of team (`employeeController.ts:18`). |
-| S14 | **Info** | No secrets committed (good); but no startup check that required secrets exist. |
+Status as of **1 Nov 2026**. Original line numbers have been dropped because the code has moved
+since the audit.
+
+| # | Severity | Finding | Status |
+|---|----------|---------|--------|
+| S1 | **High** | Broken authorization / IDOR: `deleteTask` didn't check task ownership; admins could delete any task. | ✅ Fixed |
+| S2 | **High** | Broken authorization / IDOR in groups: `getGroupTasks`, `getGroupProgress`, `getGithubStats`, `updateTaskStatus` had no ownership/membership checks. | ✅ Fixed (`checkGroupAccess`) |
+| S3 | **High** | `getAllTasks` returned every task in the DB to any admin. | ✅ Fixed (scoped to `created_by`) |
+| S4 | **High** | Tokens in `localStorage` → any XSS steals both access and refresh tokens. | ⚠️ Mitigated by CSP (§6a); httpOnly cookie still planned |
+| S5 | **Medium** | EOM score and snapshot taken from client input and stored unverified. | ✅ Fixed (recomputed server-side) |
+| S6 | **Medium** | No refresh-token rotation or reuse detection. | ✅ Fixed |
+| S7 | **Medium** | No brute-force protection on login. | ✅ Fixed (5 failures / 15 min, separate login and register limiters) |
+| S8 | **Medium** | Socket auth token never re-validated on long-lived connections. | ✅ Fixed (disconnect at token `exp`) |
+| S9 | **Medium** | `ssl: { rejectUnauthorized: false }` on the Postgres connection. | ✅ Fixed (full verification for non-local DBs) |
+| S10 | **Low/Med** | No input validation framework: register accepts empty/weak passwords and unvalidated emails; profile update accepted arbitrary strings. | ⚠️ Profile now validated; register still unvalidated |
+| S11 | **Low** | Refresh tokens stored in plaintext; `refresh_tokens` never pruned. | ⚠️ Now hashed (SHA-256); still never pruned |
+| S12 | **Low** | CORS origins + socket CORS origins hardcoded and duplicated in two files. | ❌ Open |
+| S13 | **Low** | `admin` can view any employee's stats regardless of team. | ❌ Open |
+| S14 | **Info** | No secrets committed (good); but no startup check that required secrets exist. | ❌ Open |
+| S15 | **High** | *(Found Nov 2026)* Any admin could read and post comments on any task (only employees were restricted). | ✅ Fixed (`canAccessTask`) |
+| S16 | **High** | *(Found Nov 2026)* Any admin could delete any attachment by ID. | ✅ Fixed (task ownership + attachment/task match) |
+| S17 | **High** | *(Found Nov 2026)* Anyone can register as admin, and `GET /invitations/available-employees` returned the name and email of every unassigned employee. | ✅ Fixed (endpoint removed; invite by exact email; 20 invites/hour; 7-day re-invite cooldown) |
+| S18 | **Medium** | *(Found Nov 2026)* `linkedin_url` was unvalidated and rendered as `<a href>`, allowing a stored `javascript:` URL. | ✅ Fixed (server validation, safe href on the client, migration clears existing bad values) |
+| S19 | **Medium** | *(Found Nov 2026)* Vulnerable dependency versions (1 critical, several high) in both packages. | ✅ Fixed (`npm audit fix`, unused `morgan` removed; 0 production vulnerabilities) |
+| S20 | **Medium** | *(Found Nov 2026)* No security headers or CSP on the frontend. | ✅ Fixed (§6a) |

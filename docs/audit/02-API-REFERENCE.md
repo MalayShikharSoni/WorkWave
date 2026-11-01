@@ -27,7 +27,7 @@ Legend for **Validation** column:
 | POST | `/api/auth/refresh` | — | Public (needs refresh token in body) | Partial |
 | GET | `/api/auth/me` | `authenticate` | Any logged-in | n/a |
 | POST | `/api/auth/logout` | `authenticate` | Any logged-in | None |
-| PUT | `/api/auth/profile` | `authenticate` | Any logged-in | None |
+| PUT | `/api/auth/profile` | `authenticate` | Any logged-in | Types, lengths, LinkedIn URL |
 | POST | `/api/auth/avatar` | `authenticate`, `multer.single('avatar')` | Any logged-in | Partial (file presence) |
 | GET | `/api/auth/employees` | `authenticate`, `requireRole('admin')` | Admin | n/a |
 
@@ -48,10 +48,12 @@ Legend for **Validation** column:
 
 ### POST `/refresh` (`authController.ts:166`)
 - Body: `{ refreshToken }`. Missing → `400`.
-- Verifies JWT signature against `JWT_REFRESH_SECRET`, then checks the token still exists in the
-  `refresh_tokens` table and is not expired (`authController.ts:191`). Returns a **new access
-  token only** (refresh token is NOT rotated).
-- Response `200`: `{ accessToken }`.
+- Verifies JWT signature against `JWT_REFRESH_SECRET`, then looks the token up (stored as a
+  SHA-256 hash) in `refresh_tokens`.
+- *(Updated Nov 2026)* **Rotation + reuse detection:** every refresh issues a new refresh token
+  and revokes the old one in a transaction. Presenting an already-revoked token revokes **all**
+  of that user's sessions.
+- Response `200`: `{ accessToken, refreshToken }`.
 
 ### GET `/me` (`authController.ts:136`)
 - Returns the full user profile row (raw SQL, `authController.ts:138`).
@@ -62,9 +64,14 @@ Legend for **Validation** column:
 
 ### PUT `/profile` (`authController.ts:271`)
 - Body: any of `{ first_name, bio, phone, designation, department, linkedin_url }`.
-- **No validation whatsoever** — arbitrary-length strings pass straight into a dynamic
-  `UPDATE` (`userModel.ts:65-86`). Column length limits (e.g. `phone VARCHAR(20)`) are the only
-  guardrail, and violating them yields a raw Postgres error surfaced as a 500.
+- *(Updated Nov 2026)* Validated by `utils/profileValidation.ts` before the dynamic `UPDATE`:
+  - every field must be a string;
+  - values are trimmed and capped at the column sizes (`first_name` 100, `bio` 1000, `phone` 20,
+    `designation`/`department` 100, `linkedin_url` 255);
+  - `first_name` can't be blank.
+- `linkedin_url` must be an `https://` URL on `linkedin.com` or a subdomain (an empty string
+  clears it). This blocks `javascript:`/`data:` URLs, which the profile page renders as a link.
+- Invalid input → `400` with a field-specific message.
 
 ### POST `/avatar` (`authController.ts:292`)
 - Multipart, field `avatar`, 5 MB limit (`routes/auth.ts:8-11`).
@@ -93,14 +100,14 @@ Legend for **Validation** column:
 | PUT | `/:taskId/fail` | — | Any logged-in (ownership checked) | None |
 | GET | `/:taskId/attachments` | — | Creator or assignee | None |
 | POST | `/:taskId/attachments` | `requireRole('admin')`, `multer.array('files',5)` | Admin (creator) | Partial + MIME |
-| DELETE | `/:taskId/attachments/:attachmentId` | `requireRole('admin')` | Admin | None |
-| GET | `/:taskId/comments` | — | Task participants | n/a |
-| POST | `/:taskId/comments` | — | Task participants | Partial (content) |
-| DELETE | `/:taskId/comments/:commentId` | — | Author only | None |
+| DELETE | `/:taskId/attachments/:attachmentId` | `requireRole('admin')` | Task creator; attachment must belong to `:taskId` | Integer IDs |
+| GET | `/:taskId/comments` | — | Task creator or assignee (`canAccessTask`) | n/a |
+| POST | `/:taskId/comments` | — | Task creator or assignee (`canAccessTask`) | Partial (content) |
+| DELETE | `/:taskId/comments/:commentId` | — | Comment author, and comment must belong to `:taskId` | None |
 | POST | `/` | `requireRole('admin')`, `multer.array('files',5)` | Admin | Partial + MIME |
-| GET | `/all` | `requireRole('admin')` | Admin | n/a |
+| GET | `/all` | `requireRole('admin')` | Admin (own tasks only) | n/a |
 | GET | `/by-employee` | `requireRole('admin')` | Admin | n/a |
-| DELETE | `/:taskId` | `requireRole('admin')` | Admin | None |
+| DELETE | `/:taskId` | `requireRole('admin')` | Task creator | None |
 
 ### Notable behaviours / issues
 - **Route ordering matters and is fragile.** `/:taskId/accept` etc. are declared before `/all`
@@ -116,13 +123,15 @@ Legend for **Validation** column:
   **no state-machine validation** — an employee can `complete` a task that is still `new`
   (never accepted), or `fail` an already-`completed` task; the code blindly calls
   `updateStatus` (`taskController.ts:211/253/295`).
-- **`deleteTask` (`taskController.ts:333`)** does **NOT** verify the admin owns the task. Any
-  admin can delete **any** task in the entire system by ID — there is no `created_by` check
-  (contrast with `uploadAttachments`, which does check `task.created_by`). **Broken
-  authorization / IDOR.**
-- **`getAllTasks` (`taskController.ts:151`)** returns **every task in the database** for any
-  admin, not scoped to the admin's team (`taskModel.getAll()` has no WHERE clause,
-  `taskModel.ts:94`). Cross-tenant data exposure.
+- *(Fixed)* **`deleteTask`** now checks `task.created_by` (previously any admin could delete any
+  task). **`getAllTasks`** is now scoped to `created_by = adminId` (previously it returned every
+  task in the database).
+- *(Fixed Nov 2026)* **Comments** previously only restricted employees, so any admin could read
+  or post on any task's thread. All three comment routes now use the shared
+  `utils/authz.ts → canAccessTask` (creator or assignee only).
+- *(Fixed Nov 2026)* **`deleteAttachment`** previously deleted by attachment ID with only a role
+  check. It now loads the attachment, requires `attachment.task_id === :taskId`, and requires
+  the requester to be the task's creator. Cloudinary files are still not removed on delete.
 
 ---
 
@@ -132,17 +141,26 @@ Legend for **Validation** column:
 
 | Method | Path | Middleware | Auth | Validation |
 |--------|------|-----------|------|-----------|
-| POST | `/send` | `requireRole('admin')` | Admin | Partial |
+| POST | `/send` | `requireRole('admin')`, invite limiter (20/hour per admin) | Admin | Email format |
 | GET | `/team` | `requireRole('admin')` | Admin | n/a |
-| GET | `/available-employees` | `requireRole('admin')` | Admin | n/a |
 | GET | `/pending` | `requireRole('admin')` | Admin | n/a |
 | GET | `/my-invitations` | — | Any logged-in | n/a |
 | PUT | `/respond/:id` | — | Any logged-in (scoped to their own invite) | Partial |
 
-- **`sendInvitation` (`invitationController.ts:8`)** — solid business logic: checks target is an
-  active employee, not already on a team, handles re-send of previously-rejected invites. `:id`
-  in `respond` is used directly in SQL as a parameterized value (safe), scoped by
-  `employee_id = req.user.id`.
+*(Changed Nov 2026)* `GET /available-employees` was **removed**. It returned the name and email
+of every unassigned employee to any admin, and anyone can register as an admin, so it was a
+global user directory.
+
+- **`sendInvitation`** takes `{ email }`, not `{ employeeId }`:
+  - The email is trimmed, lower-cased and matched case-insensitively against active employees;
+    there is no ID-based lookup.
+  - Errors don't name other admins: the response is "already on another team", not
+    "already on X's team".
+  - Re-inviting someone who rejected you is blocked for **7 days** after their response
+    (`429`).
+  - The route has a per-admin rate limiter of 20 attempts per hour, keyed by user ID. It's held
+    in memory, so it resets on restart.
+- `:id` in `respond` is used as a parameterized value, scoped by `employee_id = req.user.id`.
 - **`respondToInvitation` (`invitationController.ts:122`)** validates `status ∈
   {accepted,rejected}` and re-checks single-team constraint. Good.
 
@@ -188,11 +206,9 @@ Legend for **Validation** column:
 
 - Role check is done **inside the controller** (`leaderboardController.ts:8`), not via
   `requireRole` middleware — an inconsistency with tasks/invitations which use middleware.
-- `POST /archive` body: `{ employeeId, snapshotStats }`; both required (presence check only).
-  `snapshotStats` (arbitrary client-supplied JSON) is stored **verbatim** into
-  `eom_records.snapshot_stats` and `score` is taken from it — a client could archive an EOM
-  winner with a **fabricated score** (`leaderboardModel.ts:144-156`). No server-side
-  recomputation.
+- *(Fixed)* `POST /archive` body: `{ employeeId }` only. The score and stats snapshot are
+  recomputed server-side from the live leaderboard query. Previously a client-supplied score
+  was stored verbatim.
 
 ---
 
@@ -207,23 +223,17 @@ Legend for **Validation** column:
 | GET | `/my-tasks` | Any logged-in | n/a |
 | GET | `/:groupId` | Admin-owner OR group member | Type-coerce |
 | POST | `/:groupId/tasks` | Admin-owner | Partial |
-| GET | `/:groupId/tasks` | ⚠️ **Any logged-in — NO access check** | Type-coerce |
-| GET | `/:groupId/progress` | ⚠️ **Any logged-in — NO access check** | Type-coerce |
+| GET | `/:groupId/tasks` | Admin-owner OR group member | Type-coerce |
+| GET | `/:groupId/progress` | Admin-owner OR group member | Type-coerce |
 | PUT | `/:groupId/github` | Admin-owner | None |
-| GET | `/:groupId/github-stats` | ⚠️ **Any logged-in — NO access check** | Type-coerce |
-| PUT | `/:groupId/tasks/:taskId/status` | ⚠️ **Any logged-in — NO access check** | Partial |
+| GET | `/:groupId/github-stats` | Admin-owner OR group member | Type-coerce |
+| PUT | `/:groupId/tasks/:taskId/status` | Group admin-owner or the task's assignee; task must belong to `:groupId` | Partial |
 
-### Broken authorization in groups (multiple IDOR)
-- **`getGroupTasks` (`groupController.ts:132`)**, **`getGroupProgress` (`:144`)**, and
-  **`getGithubStats` (`:184`)** take a `groupId` and return data with **no check** that the
-  caller owns or belongs to the group. Any authenticated user can enumerate group IDs and read
-  any group's tasks, per-member progress, and linked GitHub stats.
-- **`updateTaskStatus` (`groupController.ts:208`)** validates the status string but performs
-  **no ownership/membership check** and **ignores the `:groupId`** entirely — it updates
-  `project_tasks` purely by `:taskId` (`groupModel.updateTaskStatus`, `groupModel.ts:217`). Any
-  authenticated user can move **any** project task through any status by guessing its ID.
-- `createGroup` (`groupController.ts:7`) does **not** verify that `memberIds` are actually on the
-  admin's team — an admin can add arbitrary user IDs as group members.
+### Group authorization
+- *(Fixed)* `getGroupTasks`, `getGroupProgress`, `getGithubStats` and `updateTaskStatus`
+  previously had no access check. They now go through `checkGroupAccess`.
+- ⚠️ Still open: `createGroup` does **not** verify that `memberIds` are on the admin's team, so
+  an admin can add arbitrary user IDs as group members.
 
 ---
 
@@ -258,7 +268,7 @@ Concrete inconsistencies:
    PG constraint violations that *would* map to 409/400 instead surface as generic 500s.
 4. **Validation errors are ad-hoc 400s** written per-handler; there is no shared validator, no
    Joi/Zod/express-validator. Message wording is inconsistent
-   (`'employeeId is required'` vs `'Title and assignedTo are required'` vs `'Invalid status'`).
+   (`'Missing employeeId'` vs `'Title and assignedTo are required'` vs `'Invalid status'`).
 5. **Auth failures**: `middleware/auth.ts` returns `{success:false,error:'No token provided'}`
    or `'Invalid or expired token'`; but `middleware/auth.ts:32` (`requireRole`) accesses
    `req.user.role` — if `authenticate` did not run first (it always does in current wiring)
@@ -270,11 +280,6 @@ Concrete inconsistencies:
 
 ## 10. Discrepancies vs README's advertised API
 
-The root `README.md` (§"API Modules") lists a **subset** and gets some details wrong:
-
-- README lists `GET /api/auth/employees` but omits `POST /api/auth/refresh`,
-  `POST /api/auth/logout`, `PUT /api/auth/profile`, `POST /api/auth/avatar` (all implemented).
-- README documents **none** of: `/api/notifications/*`, `/api/employees/:id/stats`,
-  `/api/leaderboard/*`, `/api/groups/*`, `/api/admin/analytics`, or any task
-  attachment/comment endpoints — all of which are implemented. The README's API list is roughly
-  **one-third** of the actual surface. See `09-CLAIMS-VS-REALITY.md`.
+*(Resolved)* At the time of the audit the root `README.md` documented only about a third of the
+API. The README has since been rewritten: its "API at a glance" table covers every module, and
+this document is the route-by-route reference.

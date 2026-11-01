@@ -132,7 +132,7 @@ CREATE TABLE IF NOT EXISTS team_invitations (
 ```
 - `UNIQUE(admin_id, employee_id)` prevents duplicate invites from the same admin.
 - **No index** on `employee_id` alone, yet several queries filter/aggregate by `employee_id`
-  (e.g. `getAvailableEmployees` sub-selects, leaderboard joins).
+  (e.g. the single-team check in `sendInvitation`, leaderboard joins).
 - The "one accepted team per employee" rule is enforced **only in application code**
   (`invitationController.ts:36-50, 160-175`), not by a DB constraint — a race between two
   admins' `respond` calls could put an employee on two teams.

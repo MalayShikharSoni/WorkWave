@@ -48,10 +48,10 @@ class Comment {
     return result.rows[0];
   }
 
-  static async delete(commentId: number | string, authorId: number): Promise<CommentRow | undefined> {
+  static async delete(commentId: number | string, taskId: number | string, authorId: number): Promise<CommentRow | undefined> {
     const result = await pool.query(
-      `DELETE FROM task_comments WHERE id = $1 AND author_id = $2 RETURNING *`,
-      [commentId, authorId]
+      `DELETE FROM task_comments WHERE id = $1 AND task_id = $2 AND author_id = $3 RETURNING *`,
+      [commentId, taskId, authorId]
     );
     return result.rows[0];
   }

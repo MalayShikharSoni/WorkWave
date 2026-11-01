@@ -3,3 +3,6 @@ personal_notes/*
 # Retired frontend implementations; the active client lives in frontend/
 frontend-next/
 frontend-old/
+
+# Private analysis/notes (local only)
+private/

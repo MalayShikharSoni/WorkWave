@@ -23,65 +23,37 @@ const AuthProvider: React.FC<React.PropsWithChildren> = ({ children }) => {
 
   // Memoize checkAuth so it doesn't change on every render
   const checkAuth = useCallback(async () => {
-    console.log('[AUTH] Starting auth check...');
-    console.log('[AUTH] Current timestamp:', new Date().toISOString());
-
+    // Never log tokens or user details here: anything in the console can end up
+    // in screenshots, bug reports or browser extensions.
     const token = localStorage.getItem('accessToken');
-    const refreshToken = localStorage.getItem('refreshToken');
-
-    console.log('[AUTH] Tokens in localStorage:', {
-      hasAccessToken: !!token,
-      hasRefreshToken: !!refreshToken,
-      accessTokenPreview: token ? token.substring(0, 30) + '...' : 'null'
-    });
 
     if (!token) {
-      console.log('[AUTH] No access token found - setting unauthenticated');
       setIsLoading(false);
       setIsAuthenticated(false);
       return;
     }
 
     try {
-      console.log('[AUTH] Calling GET /api/auth/me...');
       const response = await authAPI.getMe();
       const user = response.data.data;
-
-      console.log('[AUTH] Success! User:', {
-        id: user.id,
-        email: user.email,
-        role: user.role
-      });
 
       setUserData({
         role: user.role,
         data: user
       });
       setIsAuthenticated(true);
-      console.log('[AUTH] State updated - user is authenticated');
     } catch (error: unknown) {
-      console.error('[AUTH] Auth check failed!');
-      const err = error as { constructor?: { name?: string }; message?: string; response?: { status?: number; data?: unknown } };
-      console.error('[AUTH] Error type:', err.constructor?.name);
-      console.error('[AUTH] Error message:', err.message);
-      console.error('[AUTH] Response status:', err.response?.status);
-      console.error('[AUTH] Response data:', err.response?.data);
-      console.error('[AUTH] Full error:', error);
+      const err = error as { response?: { status?: number } };
+      console.error('Auth check failed (status %s)', err.response?.status ?? 'network error');
 
-      // Only clear on 401 (invalid token)
+      // Only clear tokens on 401 (invalid token). For other errors (e.g. the
+      // backend is waking up) keep them, but show the login UI.
       if (err.response?.status === 401) {
-        console.log('[AUTH] 401 error - token invalid, clearing localStorage');
         localStorage.clear();
-        setUserData(null);
-        setIsAuthenticated(false);
-      } else {
-        console.log('[AUTH] Non-401 error - keeping tokens but setting unauthenticated');
-        // Don't clear tokens, but mark as unauthenticated so UI shows login
-        setUserData(null);
-        setIsAuthenticated(false);
       }
+      setUserData(null);
+      setIsAuthenticated(false);
     } finally {
-      console.log('[AUTH] Auth check complete, setting isLoading = false');
       setIsLoading(false);
     }
   }, []);
